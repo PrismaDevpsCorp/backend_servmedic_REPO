@@ -1,0 +1,35 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: backend-servmedic
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  name: ServMedic
