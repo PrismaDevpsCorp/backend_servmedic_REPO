@@ -19,3 +19,9 @@ uploads/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Secrets / keys
+*.pem
+*.key
+*.p12
+*.jks
