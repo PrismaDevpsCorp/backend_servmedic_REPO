@@ -8,6 +8,7 @@ public record MedicalRequestResponse(
     String requestCode,
     Long patientProfileId,
     String patientFullName,
+    String patientDni,
     String serviceCode,
     String serviceName,
     String professionCode,

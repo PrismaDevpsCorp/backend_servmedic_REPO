@@ -114,6 +114,7 @@ public class MedicalRequestHistoryService {
             request.getRequestCode(),
             patientProfile.getId(),
             patientUser.getFirstName() + " " + patientUser.getLastName(),
+            patientUser.getDni(),
             service.getCode(),
             service.getName(),
             service.getProfession().getCode(),
