@@ -2,11 +2,11 @@ package pe.prismadev.servmedic.entity;
 
 import jakarta.persistence.*;
 
-import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "specialist_offered_services")
-public class SpecialistOfferedService {
+@Table(name = "specialist_payment_methods")
+public class SpecialistPaymentMethod {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -17,24 +17,29 @@ public class SpecialistOfferedService {
     private SpecialistProfile specialistProfile;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "medical_service_id", nullable = false)
-    private MedicalService medicalService;
-
-    @Column(name = "base_price", precision = 10, scale = 2)
-    private BigDecimal basePrice;
+    @JoinColumn(name = "payment_method_id", nullable = false)
+    private PaymentMethod paymentMethod;
 
     @Column(nullable = false)
     private boolean active = true;
 
-    public SpecialistOfferedService() {
+    @Column(
+        name = "created_at",
+        nullable = false,
+        insertable = false,
+        updatable = false
+    )
+    private OffsetDateTime createdAt;
+
+    public SpecialistPaymentMethod() {
     }
 
-    public SpecialistOfferedService(
+    public SpecialistPaymentMethod(
         SpecialistProfile specialistProfile,
-        MedicalService medicalService
+        PaymentMethod paymentMethod
     ) {
         this.specialistProfile = specialistProfile;
-        this.medicalService = medicalService;
+        this.paymentMethod = paymentMethod;
     }
 
     public Long getId() {
@@ -45,20 +50,16 @@ public class SpecialistOfferedService {
         return specialistProfile;
     }
 
-    public MedicalService getMedicalService() {
-        return medicalService;
-    }
-
-    public BigDecimal getBasePrice() {
-        return basePrice;
-    }
-
-    public void setBasePrice(BigDecimal basePrice) {
-        this.basePrice = basePrice;
+    public PaymentMethod getPaymentMethod() {
+        return paymentMethod;
     }
 
     public boolean isActive() {
         return active;
+    }
+
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
     }
 
     public void setActive(boolean active) {
