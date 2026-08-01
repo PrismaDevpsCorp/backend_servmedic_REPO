@@ -15,7 +15,6 @@ import pe.prismadev.servmedic.entity.UserAccount;
 import pe.prismadev.servmedic.repository.MedicalRequestRepository;
 import pe.prismadev.servmedic.repository.MedicalServiceRepository;
 import pe.prismadev.servmedic.repository.PatientProfileRepository;
-import pe.prismadev.servmedic.repository.SpecialistOfferedServiceRepository;
 import pe.prismadev.servmedic.repository.SpecialistProfileRepository;
 
 import java.math.BigDecimal;
@@ -29,20 +28,17 @@ public class MedicalRequestService {
     private final PatientProfileRepository patientProfileRepository;
     private final MedicalServiceRepository medicalServiceRepository;
     private final SpecialistProfileRepository specialistProfileRepository;
-    private final SpecialistOfferedServiceRepository specialistOfferedServiceRepository;
 
     public MedicalRequestService(
         MedicalRequestRepository medicalRequestRepository,
         PatientProfileRepository patientProfileRepository,
         MedicalServiceRepository medicalServiceRepository,
-        SpecialistProfileRepository specialistProfileRepository,
-        SpecialistOfferedServiceRepository specialistOfferedServiceRepository
+        SpecialistProfileRepository specialistProfileRepository
     ) {
         this.medicalRequestRepository = medicalRequestRepository;
         this.patientProfileRepository = patientProfileRepository;
         this.medicalServiceRepository = medicalServiceRepository;
         this.specialistProfileRepository = specialistProfileRepository;
-        this.specialistOfferedServiceRepository = specialistOfferedServiceRepository;
     }
 
     @Transactional
@@ -134,35 +130,6 @@ public class MedicalRequestService {
             ));
 
         return toResponse(detailed);
-    }
-
-    @Transactional
-    public MedicalRequestResponse acceptRequest(Long requestId, Long specialistProfileId) {
-        MedicalRequest request = medicalRequestRepository.findDetailedByIdForUpdate(requestId)
-            .orElseThrow(() -> new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Solicitud medica no encontrada: " + requestId
-            ));
-
-        if (!"PENDING".equals(request.getStatus())) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "La solicitud no esta disponible para aceptar. Estado actual: " + request.getStatus()
-            );
-        }
-
-        SpecialistProfile specialist = specialistProfileRepository.findDetailedById(specialistProfileId)
-            .orElseThrow(() -> new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Perfil de especialista no encontrado: " + specialistProfileId
-            ));
-
-        validateSpecialistCanAccept(request, specialist);
-
-        request.acceptBy(specialist);
-        MedicalRequest saved = medicalRequestRepository.save(request);
-
-        return reloadAndMap(saved.getId(), "No se pudo recuperar la solicitud aceptada.");
     }
 
     @Transactional
@@ -283,46 +250,6 @@ public class MedicalRequestService {
             .stream()
             .map(this::toResponse)
             .toList();
-    }
-
-    private void validateSpecialistCanAccept(MedicalRequest request, SpecialistProfile specialist) {
-        if (!"ACTIVE".equals(specialist.getStatus())) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "El especialista no esta activo. Estado actual: " + specialist.getStatus()
-            );
-        }
-
-        if (!specialist.isAvailable()) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "El especialista no esta disponible."
-            );
-        }
-
-        String requestProfession = request.getMedicalService().getProfession().getCode();
-        String specialistProfession = specialist.getProfession().getCode();
-
-        if (!requestProfession.equals(specialistProfession)) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "Regla antintrusismo: la solicitud requiere profesion "
-                    + requestProfession + " pero el especialista pertenece a " + specialistProfession
-            );
-        }
-
-        boolean offersService = specialistOfferedServiceRepository
-            .existsBySpecialistProfileIdAndMedicalServiceIdAndActiveTrue(
-                specialist.getId(),
-                request.getMedicalService().getId()
-            );
-
-        if (!offersService) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "El especialista no tiene configurado este servicio dentro de sus servicios ofrecidos."
-            );
-        }
     }
 
     private void validateAssignedSpecialist(MedicalRequest request, Long specialistProfileId) {

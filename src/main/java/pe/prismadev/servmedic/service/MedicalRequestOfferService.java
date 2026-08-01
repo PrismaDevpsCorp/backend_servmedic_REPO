@@ -5,7 +5,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
-import pe.prismadev.servmedic.dto.MedicalRequestResponse;
+
 import pe.prismadev.servmedic.dto.RequestOfferResponse;
 import pe.prismadev.servmedic.entity.MedicalRequest;
 import pe.prismadev.servmedic.entity.SpecialistProfile;
@@ -29,20 +29,19 @@ public class MedicalRequestOfferService {
     private final MedicalRequestRepository medicalRequestRepository;
     private final SpecialistProfileRepository specialistProfileRepository;
     private final SpecialistOfferedServiceRepository specialistOfferedServiceRepository;
-    private final MedicalRequestService medicalRequestService;
+
 
     public MedicalRequestOfferService(
         StringRedisTemplate redisTemplate,
         MedicalRequestRepository medicalRequestRepository,
         SpecialistProfileRepository specialistProfileRepository,
-        SpecialistOfferedServiceRepository specialistOfferedServiceRepository,
-        MedicalRequestService medicalRequestService
+        SpecialistOfferedServiceRepository specialistOfferedServiceRepository
     ) {
         this.redisTemplate = redisTemplate;
         this.medicalRequestRepository = medicalRequestRepository;
         this.specialistProfileRepository = specialistProfileRepository;
         this.specialistOfferedServiceRepository = specialistOfferedServiceRepository;
-        this.medicalRequestService = medicalRequestService;
+
     }
 
     public RequestOfferResponse offerRequestToSpecialist(Long medicalRequestId, Long specialistProfileId, int ttlSeconds) {
@@ -100,24 +99,6 @@ public class MedicalRequestOfferService {
         );
     }
 
-    public MedicalRequestResponse acceptOffer(Long medicalRequestId, Long specialistProfileId) {
-        String key = offerKey(medicalRequestId, specialistProfileId);
-
-        Boolean exists = redisTemplate.hasKey(key);
-
-        if (exists == null || !exists) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "La alerta de aceptacion expiro o no existe. Debe generarse una nueva alerta."
-            );
-        }
-
-        MedicalRequestResponse response = medicalRequestService.acceptRequest(medicalRequestId, specialistProfileId);
-
-        redisTemplate.delete(key);
-
-        return response;
-    }
 
     private MedicalRequest findRequest(Long medicalRequestId) {
         return medicalRequestRepository.findDetailedById(medicalRequestId)

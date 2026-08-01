@@ -28,6 +28,13 @@ public class MedicalRequest {
     @JoinColumn(name = "accepted_specialist_profile_id")
     private SpecialistProfile acceptedSpecialistProfile;
 
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(
+        name = "accepted_proposal_id",
+        unique = true
+    )
+    private MedicalRequestProposal acceptedProposal;
+
     @Column(nullable = false, length = 40)
     private String status = "PENDING";
 
@@ -105,14 +112,83 @@ public class MedicalRequest {
         return acceptedSpecialistProfile;
     }
 
+    public MedicalRequestProposal getAcceptedProposal() {
+        return acceptedProposal;
+    }
+
     public String getStatus() {
         return status;
     }
 
-    public void acceptBy(SpecialistProfile specialistProfile) {
-        this.acceptedSpecialistProfile = specialistProfile;
+
+    public void acceptProposal(
+        MedicalRequestProposal proposal,
+        OffsetDateTime acceptanceTime
+    ) {
+        if (proposal == null) {
+            throw new IllegalArgumentException(
+                "La propuesta aceptada es obligatoria."
+            );
+        }
+
+        if (acceptanceTime == null) {
+            throw new IllegalArgumentException(
+                "La fecha de aceptacion es obligatoria."
+            );
+        }
+
+        if (!"PENDING".equals(status)) {
+            throw new IllegalStateException(
+                "La solicitud no esta disponible para aceptar una propuesta. "
+                    + "Estado actual: " + status + "."
+            );
+        }
+
+        MedicalRequest proposalRequest = proposal.getMedicalRequest();
+
+        boolean belongsToThisRequest =
+            proposalRequest == this
+                || (
+                    id != null
+                    && proposalRequest != null
+                    && id.equals(proposalRequest.getId())
+                );
+
+        if (!belongsToThisRequest) {
+            throw new IllegalArgumentException(
+                "La propuesta no pertenece a esta solicitud medica."
+            );
+        }
+
+        if (proposal.getSpecialistProfile() == null) {
+            throw new IllegalArgumentException(
+                "La propuesta no tiene especialista asociado."
+            );
+        }
+
+        if (
+            proposal.getTotalAmount() == null
+                || proposal.getTotalAmount().signum() <= 0
+        ) {
+            throw new IllegalArgumentException(
+                "El total de la propuesta debe ser mayor que cero."
+            );
+        }
+
+        if (proposal.isExpiredAt(acceptanceTime)) {
+            throw new IllegalStateException(
+                "La propuesta ya expiro y no puede ser aceptada."
+            );
+        }
+
+        proposal.accept(acceptanceTime);
+
+        this.acceptedProposal = proposal;
+        this.acceptedSpecialistProfile =
+            proposal.getSpecialistProfile();
+        this.estimatedAmount = proposal.getTotalAmount();
         this.status = "ACCEPTED";
-        this.acceptedAt = OffsetDateTime.now();
+        this.acceptedAt = acceptanceTime;
     }
 
     public void startRoute() {

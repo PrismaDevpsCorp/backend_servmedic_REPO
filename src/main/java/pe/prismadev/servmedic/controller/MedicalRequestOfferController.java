@@ -1,7 +1,7 @@
 package pe.prismadev.servmedic.controller;
 
 import org.springframework.web.bind.annotation.*;
-import pe.prismadev.servmedic.dto.MedicalRequestResponse;
+
 import pe.prismadev.servmedic.dto.RequestOfferResponse;
 import pe.prismadev.servmedic.service.MedicalRequestOfferService;
 
@@ -36,11 +36,4 @@ public class MedicalRequestOfferController {
         return medicalRequestOfferService.getOfferStatus(medicalRequestId, specialistProfileId);
     }
 
-    @PatchMapping("/{medicalRequestId}/accept-offer")
-    public MedicalRequestResponse acceptOffer(
-        @PathVariable Long medicalRequestId,
-        @RequestParam Long specialistProfileId
-    ) {
-        return medicalRequestOfferService.acceptOffer(medicalRequestId, specialistProfileId);
-    }
 }

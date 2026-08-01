@@ -23,14 +23,6 @@ public class MedicalRequestController {
         return medicalRequestService.create(request);
     }
 
-    @PatchMapping("/{requestId}/accept")
-    public MedicalRequestResponse accept(
-        @PathVariable Long requestId,
-        @RequestParam Long specialistProfileId
-    ) {
-        return medicalRequestService.acceptRequest(requestId, specialistProfileId);
-    }
-
     @PatchMapping("/{requestId}/start-route")
     public MedicalRequestResponse startRoute(
         @PathVariable Long requestId,

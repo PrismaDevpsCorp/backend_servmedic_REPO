@@ -49,14 +49,6 @@ public class SpecialistMedicalRequestController {
         return medicalRequestHistoryService.listSpecialistAssignedRequests(specialistProfileId, status);
     }
 
-    @PatchMapping("/{requestId}/accept")
-    public MedicalRequestResponse accept(
-        Authentication authentication,
-        @PathVariable Long requestId
-    ) {
-        Long specialistProfileId = getRequiredLongClaim(authentication, "specialistProfileId");
-        return medicalRequestService.acceptRequest(requestId, specialistProfileId);
-    }
 
     @PatchMapping("/{requestId}/start-route")
     public MedicalRequestResponse startRoute(
