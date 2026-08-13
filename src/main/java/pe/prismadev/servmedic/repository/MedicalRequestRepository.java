@@ -86,4 +86,16 @@ public interface MedicalRequestRepository extends JpaRepository<MedicalRequest, 
         @Param("specialistProfileId") Long specialistProfileId,
         @Param("status") String status
     );
+
+    @Query("""
+        select count(ar)
+        from MedicalAttentionReport ar
+        where ar.medicalRequest.id = :medicalRequestId
+          and trim(coalesce(ar.clinicalObservations, '')) <> ''
+          and trim(coalesce(ar.recommendations, '')) <> ''
+          and trim(coalesce(ar.indications, '')) <> ''
+        """)
+    long countCompleteAttentionReports(
+        @Param("medicalRequestId") Long medicalRequestId
+    );
 }

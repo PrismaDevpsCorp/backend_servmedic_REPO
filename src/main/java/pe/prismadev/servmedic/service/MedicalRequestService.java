@@ -177,6 +177,18 @@ public class MedicalRequestService {
         validateAssignedSpecialist(request, specialistProfileId);
         validateCurrentStatus(request, "EN_ATENCION", "finalizar servicio");
 
+        if (
+            medicalRequestRepository
+                .countCompleteAttentionReports(requestId) == 0L
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "DEBE INGRESAR DATOS EN LA FICHA DE ATENCION. "
+                    + "Observaciones clinicas, recomendaciones "
+                    + "e indicaciones son obligatorias."
+            );
+        }
+
         request.finish();
         MedicalRequest saved = medicalRequestRepository.save(request);
 
