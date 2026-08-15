@@ -86,6 +86,16 @@ public class MedicalPayment {
     @JoinColumn(name = "verified_by_specialist_profile_id")
     private SpecialistProfile verifiedBySpecialistProfile;
 
+    @Column(name = "rejected_at")
+    private OffsetDateTime rejectedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "rejected_by_specialist_profile_id")
+    private SpecialistProfile rejectedBySpecialistProfile;
+
+    @Column(name = "rejection_reason", length = 500)
+    private String rejectionReason;
+
     @Column(name = "verification_warning_acknowledged", nullable = false)
     private boolean verificationWarningAcknowledged;
 
@@ -171,6 +181,32 @@ public class MedicalPayment {
         this.verifiedBySpecialistProfile = value;
     }
 
+    public OffsetDateTime getRejectedAt() {
+        return rejectedAt;
+    }
+
+    public void setRejectedAt(OffsetDateTime value) {
+        this.rejectedAt = value;
+    }
+
+    public SpecialistProfile getRejectedBySpecialistProfile() {
+        return rejectedBySpecialistProfile;
+    }
+
+    public void setRejectedBySpecialistProfile(
+        SpecialistProfile value
+    ) {
+        this.rejectedBySpecialistProfile = value;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String value) {
+        this.rejectionReason = value;
+    }
+
     public boolean isVerificationWarningAcknowledged() {
         return verificationWarningAcknowledged;
     }
@@ -187,5 +223,9 @@ public class MedicalPayment {
 
     public boolean isPaid() {
         return "PAID".equals(status);
+    }
+
+    public boolean isRejected() {
+        return "REJECTED".equals(status);
     }
 }

@@ -31,6 +31,8 @@ public record ManualPaymentResponse(
     OffsetDateTime evidenceUploadedAt,
     OffsetDateTime paidAt,
     OffsetDateTime verifiedAt,
+    OffsetDateTime rejectedAt,
+    String rejectionReason,
     boolean verificationWarningAcknowledged,
     String message
 ) {

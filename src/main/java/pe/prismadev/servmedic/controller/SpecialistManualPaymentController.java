@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import pe.prismadev.servmedic.dto.ConfirmManualPaymentRequest;
 import pe.prismadev.servmedic.dto.ManualPaymentResponse;
+import pe.prismadev.servmedic.dto.RejectManualPaymentRequest;
 import pe.prismadev.servmedic.entity.MedicalPayment;
 import pe.prismadev.servmedic.service.PaymentService;
 
@@ -82,6 +83,22 @@ public class SpecialistManualPaymentController {
         );
     }
 
+    @PatchMapping("/reject")
+    public ManualPaymentResponse reject(
+        Authentication authentication,
+        @PathVariable Long medicalRequestId,
+        @Valid @RequestBody
+        RejectManualPaymentRequest request
+    ) {
+        return paymentService.rejectForSpecialist(
+            medicalRequestId,
+            claim(
+                authentication,
+                "specialistProfileId"
+            ),
+            request.reason()
+        );
+    }
     private Long claim(
         Authentication authentication,
         String name

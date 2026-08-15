@@ -7,6 +7,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 import pe.prismadev.servmedic.dto.ManualPaymentResponse;
 import pe.prismadev.servmedic.entity.*;
+import pe.prismadev.servmedic.repository.MedicalPaymentAttemptRepository;
 import pe.prismadev.servmedic.repository.MedicalPaymentRepository;
 import pe.prismadev.servmedic.repository.MedicalRequestAdditionalRepository;
 import pe.prismadev.servmedic.repository.MedicalRequestRepository;
@@ -34,15 +35,18 @@ public class PaymentService {
     private final MedicalRequestRepository medicalRequestRepository;
     private final MedicalPaymentRepository medicalPaymentRepository;
     private final MedicalRequestAdditionalRepository additionalRepository;
+    private final MedicalPaymentAttemptRepository attemptRepository;
 
     public PaymentService(
         MedicalRequestRepository medicalRequestRepository,
         MedicalPaymentRepository medicalPaymentRepository,
-        MedicalRequestAdditionalRepository additionalRepository
+        MedicalRequestAdditionalRepository additionalRepository,
+        MedicalPaymentAttemptRepository attemptRepository
     ) {
         this.medicalRequestRepository = medicalRequestRepository;
         this.medicalPaymentRepository = medicalPaymentRepository;
         this.additionalRepository = additionalRepository;
+        this.attemptRepository = attemptRepository;
     }
 
     @Transactional
@@ -62,14 +66,95 @@ public class PaymentService {
         validatePatient(request, patientProfileId);
         validatePayableRequest(request);
 
-        if (medicalPaymentRepository.existsByMedicalRequestId(medicalRequestId)) {
-            throw new ResponseStatusException(
-                HttpStatus.CONFLICT,
-                "La solicitud ya tiene un pago registrado."
+        String normalizedMethod =
+            normalizePaymentMethod(paymentMethod);
+
+        validateEvidence(evidence);
+
+        MedicalPayment existing = medicalPaymentRepository
+            .findDetailedByMedicalRequestIdForUpdate(
+                medicalRequestId
+            )
+            .orElse(null);
+
+        if (existing != null) {
+
+            validatePatient(
+                existing.getMedicalRequest(),
+                patientProfileId
+            );
+
+            if (!"DIRECT_EXTERNAL".equals(
+                existing.getPaymentFlow()
+            )) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "El pago existente no pertenece al flujo manual directo."
+                );
+            }
+
+            if (existing.isPaid()) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "El pago ya fue confirmado."
+                );
+            }
+
+            if (existing.isPending()) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Ya existe un pago pendiente de verificacion."
+                );
+            }
+
+            if (!existing.isRejected()) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "El pago existente no puede reenviarse."
+                );
+            }
+
+            applyEvidence(
+                existing,
+                normalizedMethod,
+                externalTransactionId,
+                evidence
+            );
+
+            existing.setRejectedAt(null);
+            existing.setRejectedBySpecialistProfile(null);
+            existing.setRejectionReason(null);
+
+            existing.setPaidAt(null);
+            existing.setVerifiedAt(null);
+            existing.setVerifiedBySpecialistProfile(null);
+            existing.setVerificationWarningAcknowledged(false);
+
+            existing.setPlatformCommissionPercent(
+                COMMISSION_PERCENT
+            );
+
+            existing.setPlatformCommissionAmount(
+                BigDecimal.ZERO.setScale(2)
+            );
+
+            existing.setSpecialistNetAmount(
+                money(existing.getAmount())
+            );
+
+            existing.setStatus("PENDING");
+
+            MedicalPayment saved =
+                medicalPaymentRepository.save(existing);
+
+            return toResponse(
+                saved,
+                "Nueva evidencia registrada. Pendiente de verificacion por el especialista."
             );
         }
 
-        MedicalRequestProposal proposal = request.getAcceptedProposal();
+        MedicalRequestProposal proposal =
+            request.getAcceptedProposal();
 
         if (proposal == null) {
             throw new ResponseStatusException(
@@ -78,11 +163,11 @@ public class PaymentService {
             );
         }
 
-        String normalizedMethod = normalizePaymentMethod(paymentMethod);
-        validateEvidence(evidence);
+        BigDecimal serviceAmount =
+            money(proposal.getServiceAmount());
 
-        BigDecimal serviceAmount = money(proposal.getServiceAmount());
-        BigDecimal mobilityAmount = money(proposal.getMobilityAmount());
+        BigDecimal mobilityAmount =
+            money(proposal.getMobilityAmount());
 
         BigDecimal additionalAmount = money(
             additionalRepository.sumApprovedAmountByRequestId(
@@ -95,10 +180,15 @@ public class PaymentService {
             .add(additionalAmount)
             .setScale(2, RoundingMode.HALF_UP);
 
-        MedicalPayment payment = new MedicalPayment();
+        MedicalPayment payment =
+            new MedicalPayment();
 
         payment.setMedicalRequest(request);
-        payment.setPatientProfile(request.getPatientProfile());
+
+        payment.setPatientProfile(
+            request.getPatientProfile()
+        );
+
         payment.setSpecialistProfile(
             request.getAcceptedSpecialistProfile()
         );
@@ -108,50 +198,37 @@ public class PaymentService {
         payment.setAdditionalAmount(additionalAmount);
         payment.setAmount(totalAmount);
 
-        payment.setPlatformCommissionPercent(COMMISSION_PERCENT);
-        payment.setPlatformCommissionAmount(BigDecimal.ZERO.setScale(2));
-        payment.setSpecialistNetAmount(totalAmount);
+        payment.setPlatformCommissionPercent(
+            COMMISSION_PERCENT
+        );
+
+        payment.setPlatformCommissionAmount(
+            BigDecimal.ZERO.setScale(2)
+        );
+
+        payment.setSpecialistNetAmount(
+            totalAmount
+        );
 
         payment.setCurrency("PEN");
         payment.setPaymentFlow("DIRECT_EXTERNAL");
-        payment.setPaymentMethod(normalizedMethod);
         payment.setStatus("PENDING");
 
-        payment.setExternalTransactionId(
-            cleanNullable(externalTransactionId)
+        applyEvidence(
+            payment,
+            normalizedMethod,
+            externalTransactionId,
+            evidence
         );
 
-        payment.setEvidenceFileName(
-            safeFileName(evidence.getOriginalFilename())
-        );
-
-        payment.setEvidenceContentType(
-            normalizeContentType(evidence.getContentType())
-        );
-
-        payment.setEvidenceSize(evidence.getSize());
-
-        try {
-            payment.setEvidenceData(evidence.getBytes());
-        }
-        catch (IOException exception) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "No se pudo leer la evidencia de pago.",
-                exception
-            );
-        }
-
-        payment.setEvidenceUploadedAt(OffsetDateTime.now());
-
-        MedicalPayment saved = medicalPaymentRepository.save(payment);
+        MedicalPayment saved =
+            medicalPaymentRepository.save(payment);
 
         return toResponse(
             saved,
             "Evidencia registrada. Pendiente de verificacion por el especialista."
         );
     }
-
     @Transactional(readOnly = true)
     public ManualPaymentResponse findForPatient(
         Long medicalRequestId,
@@ -208,26 +285,35 @@ public class PaymentService {
             );
         }
 
+        lockMedicalRequest(medicalRequestId);
+
         MedicalPayment payment = medicalPaymentRepository
-            .findDetailedByMedicalRequestIdForUpdate(medicalRequestId)
+            .findDetailedByMedicalRequestIdForUpdate(
+                medicalRequestId
+            )
             .orElseThrow(() -> notFound(
                 "Pago no encontrado para la solicitud: "
                     + medicalRequestId
             ));
 
-        validateSpecialist(payment, specialistProfileId);
+        validateSpecialist(
+            payment,
+            specialistProfileId
+        );
 
-        if (!"DIRECT_EXTERNAL".equals(payment.getPaymentFlow())) {
-            throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "El pago no pertenece al flujo manual directo."
-            );
-        }
+        validateDirectPayment(payment);
 
         if (payment.isPaid()) {
             throw new ResponseStatusException(
                 HttpStatus.CONFLICT,
                 "El pago ya fue confirmado."
+            );
+        }
+
+        if (payment.isRejected()) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "El pago fue rechazado. El paciente debe registrar una nueva evidencia."
             );
         }
 
@@ -238,23 +324,41 @@ public class PaymentService {
             );
         }
 
-        BigDecimal commission = payment.getServiceAmount()
-            .multiply(COMMISSION_PERCENT)
-            .divide(
-                ONE_HUNDRED,
-                2,
-                RoundingMode.HALF_UP
-            );
+        BigDecimal commission =
+            payment.getServiceAmount()
+                .multiply(COMMISSION_PERCENT)
+                .divide(
+                    ONE_HUNDRED,
+                    2,
+                    RoundingMode.HALF_UP
+                );
 
-        BigDecimal specialistNet = payment.getAmount()
-            .subtract(commission)
-            .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal specialistNet =
+            payment.getAmount()
+                .subtract(commission)
+                .setScale(
+                    2,
+                    RoundingMode.HALF_UP
+                );
 
-        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime now =
+            OffsetDateTime.now();
 
-        payment.setPlatformCommissionPercent(COMMISSION_PERCENT);
-        payment.setPlatformCommissionAmount(commission);
-        payment.setSpecialistNetAmount(specialistNet);
+        payment.setPlatformCommissionPercent(
+            COMMISSION_PERCENT
+        );
+
+        payment.setPlatformCommissionAmount(
+            commission
+        );
+
+        payment.setSpecialistNetAmount(
+            specialistNet
+        );
+
+        payment.setRejectedAt(null);
+        payment.setRejectedBySpecialistProfile(null);
+        payment.setRejectionReason(null);
 
         payment.setVerifiedBySpecialistProfile(
             payment.getSpecialistProfile()
@@ -265,7 +369,8 @@ public class PaymentService {
         payment.setPaidAt(now);
         payment.setStatus("PAID");
 
-        MedicalPayment saved = medicalPaymentRepository.save(payment);
+        MedicalPayment saved =
+            medicalPaymentRepository.save(payment);
 
         return toResponse(
             saved,
@@ -273,6 +378,156 @@ public class PaymentService {
         );
     }
 
+    @Transactional
+    public ManualPaymentResponse rejectForSpecialist(
+        Long medicalRequestId,
+        Long specialistProfileId,
+        String reason
+    ) {
+        String normalizedReason =
+            requireRejectionReason(reason);
+
+        lockMedicalRequest(medicalRequestId);
+
+        MedicalPayment payment = medicalPaymentRepository
+            .findDetailedByMedicalRequestIdForUpdate(
+                medicalRequestId
+            )
+            .orElseThrow(() -> notFound(
+                "Pago no encontrado para la solicitud: "
+                    + medicalRequestId
+            ));
+
+        validateSpecialist(
+            payment,
+            specialistProfileId
+        );
+
+        validateDirectPayment(payment);
+
+        if (payment.isPaid()) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "El pago ya fue confirmado y no puede rechazarse."
+            );
+        }
+
+        if (payment.isRejected()) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "El pago ya fue rechazado."
+            );
+        }
+
+        if (!payment.isPending()) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "El pago no esta pendiente."
+            );
+        }
+
+        if (payment.getEvidenceData() == null) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "El pago pendiente no contiene evidencia."
+            );
+        }
+
+        OffsetDateTime now =
+            OffsetDateTime.now();
+
+        long previousAttempts =
+            attemptRepository.countByMedicalPaymentId(
+                payment.getId()
+            );
+
+        int attemptNumber =
+            Math.toIntExact(
+                previousAttempts + 1L
+            );
+
+        MedicalPaymentAttempt attempt =
+            new MedicalPaymentAttempt();
+
+        attempt.setMedicalPayment(payment);
+        attempt.setAttemptNumber(attemptNumber);
+
+        attempt.setPaymentMethod(
+            payment.getPaymentMethod()
+        );
+
+        attempt.setExternalTransactionId(
+            payment.getExternalTransactionId()
+        );
+
+        attempt.setEvidenceFileName(
+            payment.getEvidenceFileName()
+        );
+
+        attempt.setEvidenceContentType(
+            payment.getEvidenceContentType()
+        );
+
+        attempt.setEvidenceSize(
+            payment.getEvidenceSize()
+        );
+
+        attempt.setEvidenceData(
+            payment.getEvidenceData().clone()
+        );
+
+        attempt.setEvidenceUploadedAt(
+            payment.getEvidenceUploadedAt()
+        );
+
+        attempt.setRejectedAt(now);
+
+        attempt.setRejectedBySpecialistProfile(
+            payment.getSpecialistProfile()
+        );
+
+        attempt.setRejectionReason(
+            normalizedReason
+        );
+
+        attemptRepository.save(attempt);
+
+        payment.setStatus("REJECTED");
+        payment.setRejectedAt(now);
+
+        payment.setRejectedBySpecialistProfile(
+            payment.getSpecialistProfile()
+        );
+
+        payment.setRejectionReason(
+            normalizedReason
+        );
+
+        payment.setPaidAt(null);
+        payment.setVerifiedAt(null);
+        payment.setVerifiedBySpecialistProfile(null);
+        payment.setVerificationWarningAcknowledged(false);
+
+        payment.setPlatformCommissionPercent(
+            COMMISSION_PERCENT
+        );
+
+        payment.setPlatformCommissionAmount(
+            BigDecimal.ZERO.setScale(2)
+        );
+
+        payment.setSpecialistNetAmount(
+            money(payment.getAmount())
+        );
+
+        MedicalPayment saved =
+            medicalPaymentRepository.save(payment);
+
+        return toResponse(
+            saved,
+            "Pago rechazado. El paciente puede registrar una nueva evidencia."
+        );
+    }
     private MedicalPayment findPayment(Long medicalRequestId) {
         return medicalPaymentRepository
             .findDetailedByMedicalRequestId(medicalRequestId)
@@ -349,6 +604,104 @@ public class PaymentService {
         }
     }
 
+    private void lockMedicalRequest(
+        Long medicalRequestId
+    ) {
+        medicalRequestRepository
+            .findDetailedByIdForUpdate(
+                medicalRequestId
+            )
+            .orElseThrow(() -> notFound(
+                "Solicitud medica no encontrada: "
+                    + medicalRequestId
+            ));
+    }
+
+    private void validateDirectPayment(
+        MedicalPayment payment
+    ) {
+        if (!"DIRECT_EXTERNAL".equals(
+            payment.getPaymentFlow()
+        )) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "El pago no pertenece al flujo manual directo."
+            );
+        }
+    }
+
+    private String requireRejectionReason(
+        String value
+    ) {
+        String reason =
+            cleanNullable(value);
+
+        if (reason == null) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "El motivo del rechazo es obligatorio."
+            );
+        }
+
+        if (reason.length() > 500) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "El motivo del rechazo no puede superar 500 caracteres."
+            );
+        }
+
+        return reason;
+    }
+
+    private void applyEvidence(
+        MedicalPayment payment,
+        String paymentMethod,
+        String externalTransactionId,
+        MultipartFile evidence
+    ) {
+        payment.setPaymentMethod(
+            paymentMethod
+        );
+
+        payment.setExternalTransactionId(
+            cleanNullable(
+                externalTransactionId
+            )
+        );
+
+        payment.setEvidenceFileName(
+            safeFileName(
+                evidence.getOriginalFilename()
+            )
+        );
+
+        payment.setEvidenceContentType(
+            normalizeContentType(
+                evidence.getContentType()
+            )
+        );
+
+        payment.setEvidenceSize(
+            evidence.getSize()
+        );
+
+        try {
+            payment.setEvidenceData(
+                evidence.getBytes()
+            );
+        }
+        catch (IOException exception) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "No se pudo leer la evidencia de pago.",
+                exception
+            );
+        }
+
+        payment.setEvidenceUploadedAt(
+            OffsetDateTime.now()
+        );
+    }
     private void validateEvidence(MultipartFile evidence) {
         if (evidence == null || evidence.isEmpty()) {
             throw new ResponseStatusException(
@@ -481,6 +834,8 @@ public class PaymentService {
             payment.getEvidenceUploadedAt(),
             payment.getPaidAt(),
             payment.getVerifiedAt(),
+            payment.getRejectedAt(),
+            payment.getRejectionReason(),
             payment.isVerificationWarningAcknowledged(),
             message
         );

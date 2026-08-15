@@ -12,17 +12,21 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 import pe.prismadev.servmedic.dto.ManualPaymentResponse;
 import pe.prismadev.servmedic.entity.MedicalPayment;
+import pe.prismadev.servmedic.entity.MedicalPaymentAttempt;
 import pe.prismadev.servmedic.entity.MedicalRequest;
 import pe.prismadev.servmedic.entity.MedicalRequestProposal;
 import pe.prismadev.servmedic.entity.PatientProfile;
 import pe.prismadev.servmedic.entity.SpecialistProfile;
 import pe.prismadev.servmedic.entity.UserAccount;
+import pe.prismadev.servmedic.repository.MedicalPaymentAttemptRepository;
 import pe.prismadev.servmedic.repository.MedicalPaymentRepository;
 import pe.prismadev.servmedic.repository.MedicalRequestAdditionalRepository;
 import pe.prismadev.servmedic.repository.MedicalRequestRepository;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -44,6 +48,9 @@ class PaymentServiceTest {
 
     @Mock
     private MedicalPaymentRepository medicalPaymentRepository;
+
+    @Mock
+    private MedicalPaymentAttemptRepository attemptRepository;
 
     @Mock
     private MedicalRequestAdditionalRepository additionalRepository;
@@ -73,8 +80,15 @@ class PaymentServiceTest {
         service = new PaymentService(
             medicalRequestRepository,
             medicalPaymentRepository,
-            additionalRepository
+            additionalRepository,
+            attemptRepository
         );
+
+        when(
+            medicalRequestRepository.findDetailedByIdForUpdate(
+                REQUEST_ID
+            )
+        ).thenReturn(Optional.of(request));
 
         when(request.getId()).thenReturn(REQUEST_ID);
         when(request.getRequestCode()).thenReturn("SM-PAY-001");
@@ -310,5 +324,309 @@ class PaymentServiceTest {
             400,
             exception.getStatusCode().value()
         );
+    }
+
+    @Test
+    void rejectArchivesAttemptAndMarksPaymentRejected() {
+        MedicalPayment payment =
+            createPayment("PENDING");
+
+        AtomicReference<MedicalPaymentAttempt> archived =
+            new AtomicReference<>();
+
+        when(
+            medicalPaymentRepository
+                .findDetailedByMedicalRequestIdForUpdate(
+                    REQUEST_ID
+                )
+        ).thenReturn(Optional.of(payment));
+
+        when(
+            attemptRepository.countByMedicalPaymentId(
+                99L
+            )
+        ).thenReturn(0L);
+
+        when(
+            attemptRepository.save(
+                any(MedicalPaymentAttempt.class)
+            )
+        ).thenAnswer(invocation -> {
+            MedicalPaymentAttempt attempt =
+                invocation.getArgument(0);
+
+            archived.set(attempt);
+
+            return attempt;
+        });
+
+        when(
+            medicalPaymentRepository.save(
+                any(MedicalPayment.class)
+            )
+        ).thenAnswer(
+            invocation -> invocation.getArgument(0)
+        );
+
+        ManualPaymentResponse response =
+            service.rejectForSpecialist(
+                REQUEST_ID,
+                SPECIALIST_ID,
+                "El comprobante no corresponde al abono recibido."
+            );
+
+        assertEquals(
+            "REJECTED",
+            response.paymentStatus()
+        );
+
+        assertEquals(
+            "El comprobante no corresponde al abono recibido.",
+            response.rejectionReason()
+        );
+
+        assertTrue(
+            response.rejectedAt() != null
+        );
+
+        assertNull(
+            response.paidAt()
+        );
+
+        assertNull(
+            response.verifiedAt()
+        );
+
+        assertEquals(
+            new BigDecimal("0.00"),
+            response.platformCommissionAmount()
+        );
+
+        assertEquals(
+            new BigDecimal("150.00"),
+            response.specialistNetAmount()
+        );
+
+        MedicalPaymentAttempt attempt =
+            archived.get();
+
+        assertTrue(
+            attempt != null
+        );
+
+        assertEquals(
+            1,
+            attempt.getAttemptNumber()
+        );
+
+        assertEquals(
+            "YAPE",
+            attempt.getPaymentMethod()
+        );
+
+        assertEquals(
+            "OP-OLD",
+            attempt.getExternalTransactionId()
+        );
+
+        assertEquals(
+            "pago-original.png",
+            attempt.getEvidenceFileName()
+        );
+
+        assertEquals(
+            "El comprobante no corresponde al abono recibido.",
+            attempt.getRejectionReason()
+        );
+
+        assertEquals(
+            SPECIALIST_ID,
+            attempt
+                .getRejectedBySpecialistProfile()
+                .getId()
+        );
+    }
+
+    @Test
+    void resubmitRejectedPaymentCreatesNewPendingAttempt() {
+        MedicalPayment payment =
+            createPayment("REJECTED");
+
+        payment.setRejectedAt(
+            OffsetDateTime.parse(
+                "2026-08-15T17:00:00-05:00"
+            )
+        );
+
+        payment.setRejectedBySpecialistProfile(
+            specialist
+        );
+
+        payment.setRejectionReason(
+            "Comprobante anterior rechazado."
+        );
+
+        when(
+            medicalPaymentRepository
+                .findDetailedByMedicalRequestIdForUpdate(
+                    REQUEST_ID
+                )
+        ).thenReturn(Optional.of(payment));
+
+        when(
+            additionalRepository.existsByMedicalRequestIdAndStatus(
+                REQUEST_ID,
+                "PENDING"
+            )
+        ).thenReturn(false);
+
+        when(
+            medicalPaymentRepository.save(
+                any(MedicalPayment.class)
+            )
+        ).thenAnswer(
+            invocation -> invocation.getArgument(0)
+        );
+
+        MockMultipartFile newEvidence =
+            new MockMultipartFile(
+                "evidence",
+                "pago-corregido.png",
+                "image/png",
+                new byte[] { 9, 8, 7, 6 }
+            );
+
+        ManualPaymentResponse response =
+            service.registerForPatient(
+                REQUEST_ID,
+                PATIENT_ID,
+                "PLIN",
+                "OP-NEW",
+                newEvidence
+            );
+
+        assertEquals(
+            "PENDING",
+            response.paymentStatus()
+        );
+
+        assertEquals(
+            "PLIN",
+            response.paymentMethod()
+        );
+
+        assertEquals(
+            "OP-NEW",
+            response.externalTransactionId()
+        );
+
+        assertEquals(
+            "pago-corregido.png",
+            response.evidenceFileName()
+        );
+
+        assertNull(
+            response.rejectedAt()
+        );
+
+        assertNull(
+            response.rejectionReason()
+        );
+
+        assertNull(
+            response.paidAt()
+        );
+
+        assertNull(
+            response.verifiedAt()
+        );
+
+        assertEquals(
+            new BigDecimal("0.00"),
+            response.platformCommissionAmount()
+        );
+
+        assertEquals(
+            new BigDecimal("150.00"),
+            response.specialistNetAmount()
+        );
+    }
+
+    private MedicalPayment createPayment(
+        String status
+    ) {
+        MedicalPayment payment =
+            new MedicalPayment();
+
+        ReflectionTestUtils.setField(
+            payment,
+            "id",
+            99L
+        );
+
+        payment.setMedicalRequest(request);
+        payment.setPatientProfile(patient);
+        payment.setSpecialistProfile(specialist);
+
+        payment.setServiceAmount(
+            new BigDecimal("100.00")
+        );
+
+        payment.setMobilityAmount(
+            new BigDecimal("20.00")
+        );
+
+        payment.setAdditionalAmount(
+            new BigDecimal("30.00")
+        );
+
+        payment.setAmount(
+            new BigDecimal("150.00")
+        );
+
+        payment.setCurrency("PEN");
+        payment.setPaymentMethod("YAPE");
+        payment.setPaymentFlow("DIRECT_EXTERNAL");
+        payment.setStatus(status);
+
+        payment.setExternalTransactionId(
+            "OP-OLD"
+        );
+
+        payment.setPlatformCommissionPercent(
+            new BigDecimal("5.00")
+        );
+
+        payment.setPlatformCommissionAmount(
+            new BigDecimal("0.00")
+        );
+
+        payment.setSpecialistNetAmount(
+            new BigDecimal("150.00")
+        );
+
+        payment.setEvidenceFileName(
+            "pago-original.png"
+        );
+
+        payment.setEvidenceContentType(
+            "image/png"
+        );
+
+        payment.setEvidenceSize(
+            4L
+        );
+
+        payment.setEvidenceData(
+            new byte[] { 1, 2, 3, 4 }
+        );
+
+        payment.setEvidenceUploadedAt(
+            OffsetDateTime.parse(
+                "2026-08-15T16:30:00-05:00"
+            )
+        );
+
+        return payment;
     }
 }
