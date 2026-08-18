@@ -5,16 +5,45 @@ import jakarta.validation.constraints.*;
 import java.math.BigDecimal;
 
 public record CreatePatientRequest(
-    @NotBlank @Email String email,
-    @NotBlank String firstName,
-    @NotBlank String lastName,
-    @NotBlank @Pattern(regexp = "^[0-9]{8}$", message = "El DNI debe tener 8 digitos") String dni,
+    @NotBlank
+    @Email
+    String email,
+
+    @NotBlank
+    @Size(min = 8, max = 72)
+    String password,
+
+    @NotBlank
+    String firstName,
+
+    @NotBlank
+    String lastName,
+
+    @NotBlank
+    @Pattern(
+        regexp = "^[0-9]{8}$",
+        message = "El DNI debe tener 8 digitos"
+    )
+    String dni,
+
     String mobilePhone,
     String landlinePhone,
-    @NotBlank String addressText,
+
+    @NotBlank
+    String addressText,
+
     String addressReference,
-    @NotNull @DecimalMin(value = "-90.0") @DecimalMax(value = "90.0") BigDecimal latitude,
-    @NotNull @DecimalMin(value = "-180.0") @DecimalMax(value = "180.0") BigDecimal longitude,
+
+    @NotNull
+    @DecimalMin(value = "-90.0")
+    @DecimalMax(value = "90.0")
+    BigDecimal latitude,
+
+    @NotNull
+    @DecimalMin(value = "-180.0")
+    @DecimalMax(value = "180.0")
+    BigDecimal longitude,
+
     String bloodType,
     String allergies,
     String preexistingConditions

@@ -18,11 +18,17 @@ public record AdminPaymentResponse(
     String specialistEmail,
     String specialistMobilePhone,
 
+    BigDecimal serviceAmount,
+    BigDecimal mobilityAmount,
+    BigDecimal additionalAmount,
     BigDecimal amount,
+
     BigDecimal platformCommissionPercent,
     BigDecimal platformCommissionAmount,
     BigDecimal specialistNetAmount,
+
     String currency,
+    String paymentFlow,
     String paymentMethod,
     String status,
     String externalTransactionId,

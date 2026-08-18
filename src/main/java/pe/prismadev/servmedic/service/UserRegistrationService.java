@@ -1,6 +1,7 @@
 package pe.prismadev.servmedic.service;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -26,6 +27,9 @@ public class UserRegistrationService {
     private final SpecialistProfileRepository specialistProfileRepository;
     private final SpecialistOfferedServiceRepository specialistOfferedServiceRepository;
 
+    private final BCryptPasswordEncoder passwordEncoder =
+        new BCryptPasswordEncoder();
+
     public UserRegistrationService(
         RoleRepository roleRepository,
         ProfessionRepository professionRepository,
@@ -45,20 +49,46 @@ public class UserRegistrationService {
     }
 
     @Transactional
-    public PatientRegistrationResponse registerPatient(CreatePatientRequest request) {
-        validateContact(request.mobilePhone(), request.landlinePhone());
-        validateUniqueUser(request.email(), request.dni());
+    public PatientRegistrationResponse registerPatient(
+        CreatePatientRequest request
+    ) {
+        validatePassword(request.password());
+        validateContact(
+            request.mobilePhone(),
+            request.landlinePhone()
+        );
 
-        Role patientRole = findRole("PACIENTE");
+        String normalizedEmail =
+            normalizeEmail(request.email());
 
-        UserAccount user = new UserAccount();
+        String normalizedDni =
+            normalizeDni(request.dni());
+
+        validateUniqueUser(
+            normalizedEmail,
+            normalizedDni
+        );
+
+        Role patientRole =
+            findRole("PACIENTE");
+
+        UserAccount user =
+            new UserAccount();
+
         user.setRole(patientRole);
+
+        user.setPasswordHash(
+            passwordEncoder.encode(
+                request.password()
+            )
+        );
+
         fillCommonUserData(
             user,
-            request.email(),
+            normalizedEmail,
             request.firstName(),
             request.lastName(),
-            request.dni(),
+            normalizedDni,
             request.mobilePhone(),
             request.landlinePhone(),
             request.addressText(),
@@ -67,15 +97,38 @@ public class UserRegistrationService {
             request.longitude()
         );
 
-        UserAccount savedUser = userAccountRepository.save(user);
+        UserAccount savedUser =
+            userAccountRepository.save(user);
 
-        PatientProfile patientProfile = new PatientProfile();
-        patientProfile.setUserAccount(savedUser);
-        patientProfile.setBloodType(cleanNullable(request.bloodType()));
-        patientProfile.setAllergies(cleanNullable(request.allergies()));
-        patientProfile.setPreexistingConditions(cleanNullable(request.preexistingConditions()));
+        PatientProfile patientProfile =
+            new PatientProfile();
 
-        PatientProfile savedProfile = patientProfileRepository.save(patientProfile);
+        patientProfile.setUserAccount(
+            savedUser
+        );
+
+        patientProfile.setBloodType(
+            cleanNullable(
+                request.bloodType()
+            )
+        );
+
+        patientProfile.setAllergies(
+            cleanNullable(
+                request.allergies()
+            )
+        );
+
+        patientProfile.setPreexistingConditions(
+            cleanNullable(
+                request.preexistingConditions()
+            )
+        );
+
+        PatientProfile savedProfile =
+            patientProfileRepository.save(
+                patientProfile
+            );
 
         return new PatientRegistrationResponse(
             savedUser.getId(),
@@ -84,52 +137,114 @@ public class UserRegistrationService {
             savedUser.getEmail(),
             fullName(savedUser),
             savedUser.getDni(),
-            "Paciente registrado correctamente."
+            "Paciente registrado correctamente. Ya puede iniciar sesion."
         );
     }
 
     @Transactional
-    public SpecialistRegistrationResponse registerSpecialist(CreateSpecialistRequest request) {
-        validateContact(request.mobilePhone(), request.landlinePhone());
-        validateUniqueUser(request.email(), request.dni());
-        validateNoDuplicateServiceCodes(request.offeredServiceCodes());
+    public SpecialistRegistrationResponse registerSpecialist(
+        CreateSpecialistRequest request
+    ) {
+        validatePassword(request.password());
 
-        Role specialistRole = findRole("ESPECIALISTA");
+        validateContact(
+            request.mobilePhone(),
+            request.landlinePhone()
+        );
 
-        Profession profession = professionRepository.findByCode(request.professionCode())
-            .filter(Profession::isActive)
-            .orElseThrow(() -> new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Profesion no encontrada o inactiva: " + request.professionCode()
-            ));
+        validateNoDuplicateServiceCodes(
+            request.offeredServiceCodes()
+        );
 
-        List<MedicalService> offeredServices = medicalServiceRepository.findActiveByCodes(request.offeredServiceCodes());
+        String normalizedEmail =
+            normalizeEmail(request.email());
 
-        if (offeredServices.size() != request.offeredServiceCodes().size()) {
+        String normalizedDni =
+            normalizeDni(request.dni());
+
+        String professionCode =
+            request.professionCode()
+                .trim()
+                .toUpperCase();
+
+        validateUniqueUser(
+            normalizedEmail,
+            normalizedDni
+        );
+
+        Role specialistRole =
+            findRole("ESPECIALISTA");
+
+        Profession profession =
+            professionRepository
+                .findByCode(professionCode)
+                .filter(Profession::isActive)
+                .orElseThrow(
+                    () ->
+                        new ResponseStatusException(
+                            HttpStatus.NOT_FOUND,
+                            "Profesion no encontrada o inactiva: "
+                                + professionCode
+                        )
+                );
+
+        List<MedicalService> offeredServices =
+            medicalServiceRepository
+                .findActiveByCodes(
+                    request.offeredServiceCodes()
+                );
+
+        if (
+            offeredServices.size()
+                != request.offeredServiceCodes().size()
+        ) {
             throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Uno o mas servicios medicos no existen o estan inactivos."
             );
         }
 
-        for (MedicalService service : offeredServices) {
-            if (!service.getProfession().getCode().equals(profession.getCode())) {
+        for (
+            MedicalService service :
+            offeredServices
+        ) {
+            if (
+                !service
+                    .getProfession()
+                    .getCode()
+                    .equals(
+                        profession.getCode()
+                    )
+            ) {
                 throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Regla antintrusismo: el servicio " + service.getCode()
-                        + " no pertenece a la profesion " + profession.getCode()
+                    "Regla antintrusismo: el servicio "
+                        + service.getCode()
+                        + " no pertenece a la profesion "
+                        + profession.getCode()
                 );
             }
         }
 
-        UserAccount user = new UserAccount();
-        user.setRole(specialistRole);
+        UserAccount user =
+            new UserAccount();
+
+        user.setRole(
+            specialistRole
+        );
+
+        user.setPasswordHash(
+            passwordEncoder.encode(
+                request.password()
+            )
+        );
+
         fillCommonUserData(
             user,
-            request.email(),
+            normalizedEmail,
             request.firstName(),
             request.lastName(),
-            request.dni(),
+            normalizedDni,
             request.mobilePhone(),
             request.landlinePhone(),
             request.addressText(),
@@ -138,17 +253,41 @@ public class UserRegistrationService {
             request.longitude()
         );
 
-        UserAccount savedUser = userAccountRepository.save(user);
+        UserAccount savedUser =
+            userAccountRepository.save(user);
 
-        SpecialistProfile specialistProfile = new SpecialistProfile();
-        specialistProfile.setUserAccount(savedUser);
-        specialistProfile.setProfession(profession);
-        specialistProfile.setCollegeNumber(request.collegeNumber());
+        SpecialistProfile specialistProfile =
+            new SpecialistProfile();
 
-        SpecialistProfile savedProfile = specialistProfileRepository.save(specialistProfile);
+        specialistProfile.setUserAccount(
+            savedUser
+        );
 
-        for (MedicalService service : offeredServices) {
-            specialistOfferedServiceRepository.save(new SpecialistOfferedService(savedProfile, service));
+        specialistProfile.setProfession(
+            profession
+        );
+
+        specialistProfile.setCollegeNumber(
+            request
+                .collegeNumber()
+                .trim()
+        );
+
+        SpecialistProfile savedProfile =
+            specialistProfileRepository.save(
+                specialistProfile
+            );
+
+        for (
+            MedicalService service :
+            offeredServices
+        ) {
+            specialistOfferedServiceRepository.save(
+                new SpecialistOfferedService(
+                    savedProfile,
+                    service
+                )
+            );
         }
 
         return new SpecialistRegistrationResponse(
@@ -162,23 +301,42 @@ public class UserRegistrationService {
             fullName(savedUser),
             savedUser.getDni(),
             request.offeredServiceCodes(),
-            "Especialista registrado correctamente. Estado inicial: PENDING_VALIDATION."
+            "Especialista registrado correctamente. "
+                + "Estado inicial: PENDING_VALIDATION. "
+                + "El acceso operativo se habilitara luego de la validacion administrativa."
         );
     }
 
     @Transactional
-    public SpecialistRegistrationResponse activateSpecialistForDevelopment(Long specialistProfileId) {
-        SpecialistProfile profile = specialistProfileRepository.findById(specialistProfileId)
-            .orElseThrow(() -> new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Perfil de especialista no encontrado: " + specialistProfileId
-            ));
+    public SpecialistRegistrationResponse activateSpecialistForDevelopment(
+        Long specialistProfileId
+    ) {
+        SpecialistProfile profile =
+            specialistProfileRepository
+                .findById(
+                    specialistProfileId
+                )
+                .orElseThrow(
+                    () ->
+                        new ResponseStatusException(
+                            HttpStatus.NOT_FOUND,
+                            "Perfil de especialista no encontrado: "
+                                + specialistProfileId
+                        )
+                );
 
         profile.activateForDevelopment();
 
-        SpecialistProfile saved = specialistProfileRepository.save(profile);
-        UserAccount user = saved.getUserAccount();
-        Profession profession = saved.getProfession();
+        SpecialistProfile saved =
+            specialistProfileRepository.save(
+                profile
+            );
+
+        UserAccount user =
+            saved.getUserAccount();
+
+        Profession profession =
+            saved.getProfession();
 
         return new SpecialistRegistrationResponse(
             user.getId(),
@@ -195,30 +353,65 @@ public class UserRegistrationService {
         );
     }
 
-    private Role findRole(String code) {
-        return roleRepository.findByCode(code)
+    private Role findRole(
+        String code
+    ) {
+        return roleRepository
+            .findByCode(code)
             .filter(Role::isActive)
-            .orElseThrow(() -> new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Rol no encontrado o inactivo: " + code
-            ));
+            .orElseThrow(
+                () ->
+                    new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Rol no encontrado o inactivo: "
+                            + code
+                    )
+            );
     }
 
-    private void validateUniqueUser(String email, String dni) {
-        if (userAccountRepository.existsByEmail(email)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ya existe un usuario con el email: " + email);
+    private void validateUniqueUser(
+        String email,
+        String dni
+    ) {
+        if (
+            userAccountRepository
+                .existsByEmail(email)
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Ya existe un usuario con el email: "
+                    + email
+            );
         }
 
-        if (userAccountRepository.existsByDni(dni)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Ya existe un usuario con el DNI: " + dni);
+        if (
+            userAccountRepository
+                .existsByDni(dni)
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Ya existe un usuario con el DNI: "
+                    + dni
+            );
         }
     }
 
-    private void validateContact(String mobilePhone, String landlinePhone) {
-        boolean hasMobile = mobilePhone != null && !mobilePhone.isBlank();
-        boolean hasLandline = landlinePhone != null && !landlinePhone.isBlank();
+    private void validateContact(
+        String mobilePhone,
+        String landlinePhone
+    ) {
+        boolean hasMobile =
+            mobilePhone != null
+                && !mobilePhone.isBlank();
 
-        if (!hasMobile && !hasLandline) {
+        boolean hasLandline =
+            landlinePhone != null
+                && !landlinePhone.isBlank();
+
+        if (
+            !hasMobile
+                && !hasLandline
+        ) {
             throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Debe ingresar al menos celular o telefono."
@@ -226,10 +419,59 @@ public class UserRegistrationService {
         }
     }
 
-    private void validateNoDuplicateServiceCodes(List<String> serviceCodes) {
-        Set<String> unique = new HashSet<>(serviceCodes);
+    private void validatePassword(
+        String password
+    ) {
+        if (
+            password == null
+                || password.length() < 8
+                || password.length() > 72
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "La contrasena debe tener entre 8 y 72 caracteres."
+            );
+        }
 
-        if (unique.size() != serviceCodes.size()) {
+        boolean hasLower =
+            password.matches(
+                ".*[a-z].*"
+            );
+
+        boolean hasUpper =
+            password.matches(
+                ".*[A-Z].*"
+            );
+
+        boolean hasDigit =
+            password.matches(
+                ".*[0-9].*"
+            );
+
+        if (
+            !hasLower
+                || !hasUpper
+                || !hasDigit
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "La contrasena debe contener mayuscula, minuscula y numero."
+            );
+        }
+    }
+
+    private void validateNoDuplicateServiceCodes(
+        List<String> serviceCodes
+    ) {
+        Set<String> unique =
+            new HashSet<>(
+                serviceCodes
+            );
+
+        if (
+            unique.size()
+                != serviceCodes.size()
+        ) {
             throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "No debe repetir servicios ofrecidos."
@@ -250,23 +492,81 @@ public class UserRegistrationService {
         java.math.BigDecimal latitude,
         java.math.BigDecimal longitude
     ) {
-        user.setEmail(email.trim().toLowerCase());
-        user.setFirstName(firstName.trim());
-        user.setLastName(lastName.trim());
-        user.setDni(dni.trim());
-        user.setMobilePhone(cleanNullable(mobilePhone));
-        user.setLandlinePhone(cleanNullable(landlinePhone));
-        user.setAddressText(addressText.trim());
-        user.setAddressReference(cleanNullable(addressReference));
-        user.setLatitude(latitude);
-        user.setLongitude(longitude);
+        user.setEmail(
+            email
+        );
+
+        user.setFirstName(
+            firstName.trim()
+        );
+
+        user.setLastName(
+            lastName.trim()
+        );
+
+        user.setDni(
+            dni
+        );
+
+        user.setMobilePhone(
+            cleanNullable(
+                mobilePhone
+            )
+        );
+
+        user.setLandlinePhone(
+            cleanNullable(
+                landlinePhone
+            )
+        );
+
+        user.setAddressText(
+            addressText.trim()
+        );
+
+        user.setAddressReference(
+            cleanNullable(
+                addressReference
+            )
+        );
+
+        user.setLatitude(
+            latitude
+        );
+
+        user.setLongitude(
+            longitude
+        );
     }
 
-    private String cleanNullable(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
+    private String normalizeEmail(
+        String value
+    ) {
+        return value
+            .trim()
+            .toLowerCase();
     }
 
-    private String fullName(UserAccount user) {
-        return user.getFirstName() + " " + user.getLastName();
+    private String normalizeDni(
+        String value
+    ) {
+        return value.trim();
+    }
+
+    private String cleanNullable(
+        String value
+    ) {
+        return value == null
+            || value.isBlank()
+                ? null
+                : value.trim();
+    }
+
+    private String fullName(
+        UserAccount user
+    ) {
+        return user.getFirstName()
+            + " "
+            + user.getLastName();
     }
 }

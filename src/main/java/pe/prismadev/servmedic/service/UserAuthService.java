@@ -20,7 +20,9 @@ public class UserAuthService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final JwtService jwtService;
-    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    private final BCryptPasswordEncoder passwordEncoder =
+        new BCryptPasswordEncoder();
 
     public UserAuthService(
         NamedParameterJdbcTemplate jdbcTemplate,
@@ -31,94 +33,223 @@ public class UserAuthService {
     }
 
     @Transactional(readOnly = true)
-    public UserLoginResponse loginPatient(UserLoginRequest request) {
-        return loginByRole(request, "PACIENTE");
+    public UserLoginResponse loginPatient(
+        UserLoginRequest request
+    ) {
+        return loginByRole(
+            request,
+            "PACIENTE"
+        );
     }
 
     @Transactional(readOnly = true)
-    public UserLoginResponse loginSpecialist(UserLoginRequest request) {
-        return loginByRole(request, "ESPECIALISTA");
+    public UserLoginResponse loginSpecialist(
+        UserLoginRequest request
+    ) {
+        return loginByRole(
+            request,
+            "ESPECIALISTA"
+        );
     }
 
-    private UserLoginResponse loginByRole(UserLoginRequest request, String expectedRole) {
-        if (request == null || request.username() == null || request.username().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Usuario requerido.");
+    private UserLoginResponse loginByRole(
+        UserLoginRequest request,
+        String expectedRole
+    ) {
+        if (
+            request == null
+                || request.username() == null
+                || request.username().isBlank()
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Usuario requerido."
+            );
         }
 
-        if (request.password() == null || request.password().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contrasena requerida.");
+        if (
+            request.password() == null
+                || request.password().isBlank()
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Contrasena requerida."
+            );
         }
 
-        String login = request.username().trim().toLowerCase();
+        String login =
+            request.username()
+                .trim()
+                .toLowerCase();
 
         String sql = """
             select
                 ua.id as user_id,
                 ua.email,
-                trim(concat(coalesce(ua.first_name, ''), ' ', coalesce(ua.last_name, ''))) as full_name,
+                trim(
+                    concat(
+                        coalesce(ua.first_name, ''),
+                        ' ',
+                        coalesce(ua.last_name, '')
+                    )
+                ) as full_name,
                 ua.password_hash,
                 r.code as role_code,
                 pp.id as patient_profile_id,
                 sp.id as specialist_profile_id,
                 sp.status as specialist_status
             from user_accounts ua
-            join roles r on r.id = ua.role_id
-            left join patient_profiles pp on pp.user_account_id = ua.id
-            left join specialist_profiles sp on sp.user_account_id = ua.id
+            join roles r
+              on r.id = ua.role_id
+            left join patient_profiles pp
+              on pp.user_account_id = ua.id
+            left join specialist_profiles sp
+              on sp.user_account_id = ua.id
             where ua.active = true
-            and r.active = true
-            and r.code = :expectedRole
-            and (
-                lower(ua.email) = :login
-                or ua.dni = :login
-            )
+              and r.active = true
+              and r.code = :expectedRole
+              and (
+                    lower(ua.email) = :login
+                    or ua.dni = :login
+              )
             order by ua.id asc
             limit 1
             """;
 
-        MapSqlParameterSource params = new MapSqlParameterSource()
-            .addValue("login", login)
-            .addValue("expectedRole", expectedRole);
+        MapSqlParameterSource params =
+            new MapSqlParameterSource()
+                .addValue(
+                    "login",
+                    login
+                )
+                .addValue(
+                    "expectedRole",
+                    expectedRole
+                );
 
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, params);
+        List<Map<String, Object>> rows =
+            jdbcTemplate.queryForList(
+                sql,
+                params
+            );
 
         if (rows.isEmpty()) {
             throwUnauthorized();
         }
 
-        Map<String, Object> row = rows.get(0);
+        Map<String, Object> row =
+            rows.get(0);
 
-        String passwordHash = getNullableString(row.get("password_hash"));
+        String passwordHash =
+            getNullableString(
+                row.get(
+                    "password_hash"
+                )
+            );
 
-        if (passwordHash == null || !passwordEncoder.matches(request.password(), passwordHash)) {
+        if (
+            passwordHash == null
+                || !passwordEncoder.matches(
+                    request.password(),
+                    passwordHash
+                )
+        ) {
             throwUnauthorized();
         }
 
-        Long userId = getLong(row.get("user_id"));
-        String email = getNullableString(row.get("email"));
-        String fullName = getNullableString(row.get("full_name"));
-        String role = getNullableString(row.get("role_code"));
-        Long patientProfileId = getLong(row.get("patient_profile_id"));
-        Long specialistProfileId = getLong(row.get("specialist_profile_id"));
-        String specialistStatus = getNullableString(row.get("specialist_status"));
+        Long userId =
+            getLong(
+                row.get(
+                    "user_id"
+                )
+            );
 
-        if ("PACIENTE".equals(expectedRole) && patientProfileId == null) {
+        String email =
+            getNullableString(
+                row.get(
+                    "email"
+                )
+            );
+
+        String fullName =
+            getNullableString(
+                row.get(
+                    "full_name"
+                )
+            );
+
+        String role =
+            getNullableString(
+                row.get(
+                    "role_code"
+                )
+            );
+
+        Long patientProfileId =
+            getLong(
+                row.get(
+                    "patient_profile_id"
+                )
+            );
+
+        Long specialistProfileId =
+            getLong(
+                row.get(
+                    "specialist_profile_id"
+                )
+            );
+
+        String specialistStatus =
+            getNullableString(
+                row.get(
+                    "specialist_status"
+                )
+            );
+
+        if (
+            "PACIENTE".equals(
+                expectedRole
+            )
+                && patientProfileId == null
+        ) {
             throwUnauthorized();
         }
 
-        if ("ESPECIALISTA".equals(expectedRole) && specialistProfileId == null) {
+        if (
+            "ESPECIALISTA".equals(
+                expectedRole
+            )
+                && specialistProfileId == null
+        ) {
             throwUnauthorized();
         }
 
-        String token = jwtService.generateUserToken(
-            userId,
-            email,
-            fullName,
-            role,
-            patientProfileId,
-            specialistProfileId,
-            specialistStatus
-        );
+        if (
+            "ESPECIALISTA".equals(
+                expectedRole
+            )
+                && !"ACTIVE".equals(
+                    specialistStatus
+                )
+        ) {
+            throw new ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                specialistAccessMessage(
+                    specialistStatus
+                )
+            );
+        }
+
+        String token =
+            jwtService.generateUserToken(
+                userId,
+                email,
+                fullName,
+                role,
+                patientProfileId,
+                specialistProfileId,
+                specialistStatus
+            );
 
         return new UserLoginResponse(
             userId,
@@ -133,6 +264,45 @@ public class UserAuthService {
         );
     }
 
+    private String specialistAccessMessage(
+        String status
+    ) {
+        if (
+            status == null
+                || "PENDING_VALIDATION".equals(
+                    status
+                )
+        ) {
+            return "Registro recibido. Su perfil profesional esta pendiente de validacion.";
+        }
+
+        if (
+            "PENDING_INTERVIEW".equals(
+                status
+            )
+        ) {
+            return "Su perfil profesional esta pendiente de entrevista.";
+        }
+
+        if (
+            "SUSPENDED".equals(
+                status
+            )
+        ) {
+            return "Su cuenta de especialista se encuentra suspendida.";
+        }
+
+        if (
+            status.startsWith(
+                "REJECTED_"
+            )
+        ) {
+            return "Su registro de especialista no se encuentra habilitado.";
+        }
+
+        return "Su perfil de especialista todavia no esta habilitado para operar.";
+    }
+
     private void throwUnauthorized() {
         throw new ResponseStatusException(
             HttpStatus.UNAUTHORIZED,
@@ -140,20 +310,26 @@ public class UserAuthService {
         );
     }
 
-    private Long getLong(Object value) {
+    private Long getLong(
+        Object value
+    ) {
         if (value == null) {
             return null;
         }
 
-        return ((Number) value).longValue();
+        return ((Number) value)
+            .longValue();
     }
 
-    private String getNullableString(Object value) {
+    private String getNullableString(
+        Object value
+    ) {
         if (value == null) {
             return null;
         }
 
-        String text = value.toString();
+        String text =
+            value.toString();
 
         if (text.isBlank()) {
             return null;
