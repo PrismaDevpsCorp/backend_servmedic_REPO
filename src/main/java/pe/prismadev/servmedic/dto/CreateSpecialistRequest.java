@@ -51,7 +51,6 @@ public record CreateSpecialistRequest(
     @NotBlank
     String collegeNumber,
 
-    @NotEmpty
     List<String> offeredServiceCodes
 ) {
 }

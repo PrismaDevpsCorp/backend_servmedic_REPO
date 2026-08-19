@@ -27,6 +27,9 @@ public class UserRegistrationService {
     private final SpecialistProfileRepository specialistProfileRepository;
     private final SpecialistOfferedServiceRepository specialistOfferedServiceRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private SpecialistRegistrationCommercialProvisioningService specialistCommercialProvisioningService;
+
     private final BCryptPasswordEncoder passwordEncoder =
         new BCryptPasswordEncoder();
 
@@ -152,10 +155,6 @@ public class UserRegistrationService {
             request.landlinePhone()
         );
 
-        validateNoDuplicateServiceCodes(
-            request.offeredServiceCodes()
-        );
-
         String normalizedEmail =
             normalizeEmail(request.email());
 
@@ -190,40 +189,16 @@ public class UserRegistrationService {
 
         List<MedicalService> offeredServices =
             medicalServiceRepository
-                .findActiveByCodes(
-                    request.offeredServiceCodes()
+                .findActiveByProfessionCode(
+                    profession.getCode()
                 );
 
-        if (
-            offeredServices.size()
-                != request.offeredServiceCodes().size()
-        ) {
+        if (offeredServices.isEmpty()) {
             throw new ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "Uno o mas servicios medicos no existen o estan inactivos."
+                HttpStatus.CONFLICT,
+                "La profesion no tiene servicios medicos activos configurados: "
+                    + profession.getCode()
             );
-        }
-
-        for (
-            MedicalService service :
-            offeredServices
-        ) {
-            if (
-                !service
-                    .getProfession()
-                    .getCode()
-                    .equals(
-                        profession.getCode()
-                    )
-            ) {
-                throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Regla antintrusismo: el servicio "
-                        + service.getCode()
-                        + " no pertenece a la profesion "
-                        + profession.getCode()
-                );
-            }
         }
 
         UserAccount user =
@@ -278,17 +253,10 @@ public class UserRegistrationService {
                 specialistProfile
             );
 
-        for (
-            MedicalService service :
-            offeredServices
-        ) {
-            specialistOfferedServiceRepository.save(
-                new SpecialistOfferedService(
-                    savedProfile,
-                    service
-                )
-            );
-        }
+        specialistCommercialProvisioningService.provision(
+            savedProfile.getId(),
+            profession.getCode()
+        );
 
         return new SpecialistRegistrationResponse(
             savedUser.getId(),
@@ -300,7 +268,10 @@ public class UserRegistrationService {
             savedUser.getEmail(),
             fullName(savedUser),
             savedUser.getDni(),
-            request.offeredServiceCodes(),
+            offeredServices
+                .stream()
+                .map(MedicalService::getCode)
+                .toList(),
             "Especialista registrado correctamente. "
                 + "Estado inicial: PENDING_VALIDATION. "
                 + "El acceso operativo se habilitara luego de la validacion administrativa."
